@@ -1,5 +1,49 @@
 # NEXUS-Omega Development Log
 
+## 2026-09-20 10:21 UTC - Training Callbacks & Monitoring
+
+Just added training infrastructure! Now we can actually train this thing properly :D
+
+**What got added:**
+
+**Callbacks (`nexus_omega/training/callbacks.py`):**
+- `EarlyStopping` - Stops training when validation loss plateaus
+- `ModelCheckpoint` - Saves best model automatically
+- `MetricsLogger` - Logs metrics to JSONL for analysis
+- `LearningRateScheduler` - Warmup, step decay, cosine annealing
+- `GradientClipper` - Prevents exploding gradients
+- `ProgressBar` - Nice training progress display
+- `CallbackList` - Manages multiple callbacks together
+
+**Monitoring (`nexus_omega/training/monitoring.py`):**
+- `MetricsTracker` - Tracks and aggregates metrics per epoch
+- `TrainingMonitor` - Full training lifecycle monitoring with time estimates
+- `GradientMonitor` - Debug gradient flow during training
+- `MemoryMonitor` - Track GPU memory usage (helps find bottlenecks)
+
+**Testing:**
+```
+Early stopping triggered at epoch 6
+Best val_loss: 0.500000
+Callbacks test passed!
+
+Training started...
+Epoch 1/2 [==============================] loss: 0.500000
+Epoch completed in 0.00s
+All monitoring tests passed!
+```
+
+**Why this matters:**
+Training deep models is tricky. These utilities help:
+- Prevent overfitting (early stopping)
+- Resume from checkpoints if training crashes
+- Monitor what's happening inside the model
+- Debug training issues quickly
+
+The training pipeline is almost complete now. Just need to integrate everything and we're ready to run experiments :P
+
+---
+
 ## 2026-09-20 10:12 UTC - Pushed to GitHub
 
 Just pushed the latest changes! Data utilities are now live on the repo :D
