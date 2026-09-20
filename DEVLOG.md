@@ -1,6 +1,40 @@
 # NEXUS-Omega Development Log
 
-## 2026-09-20 - Initial Architecture Design
+## 2026-09-20 10:12 UTC - Pushed to GitHub
+
+Just pushed the latest changes! Data utilities are now live on the repo :D
+
+**Commits pushed:**
+- Data loading infrastructure complete
+- Progress documentation added
+
+Everything's syncing nicely. The documentation is staying clean and human-readable.
+
+---
+
+## 2026-09-20 10:03 UTC - Data Loading Infrastructure
+
+Just added the data utilities module! Clean and simple :D
+
+**What got done:**
+- Created `nexus_omega/data/` package
+- TextDataset class handles tokenization upfront
+- StreamingDataset for when data doesn't fit in ram
+- SimpleTokenizer for testing without external deps
+- Fixed bug where short texts got dropped (now padded properly)
+
+**Testing:**
+```
+Dataset size: 3
+Batch shape: torch.Size([2, 16])
+All tests passing
+```
+
+Training pipeline is shaping up nicely. Just need compute now :p
+
+---
+
+## 2026-09-20 09:40 UTC - Initial Architecture Design
 
 Just finished laying out the complete architecture for NEXUS-Omega! :D
 
