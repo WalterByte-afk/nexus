@@ -1,0 +1,31 @@
+# NEXUS-Ω Requirements
+
+# Core dependencies
+torch>=2.1.0
+torchvision>=0.16.0
+torchaudio>=2.1.0
+
+# Optimization
+accelerate>=0.25.0
+bitsandbytes>=0.41.0  # For quantization
+
+# Training utilities
+tqdm>=4.66.0
+wandb>=0.16.0  # Optional: for experiment tracking
+tensorboard>=2.14.0  # Optional: for logging
+
+# Data processing
+numpy>=1.24.0
+pandas>=2.0.0
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+
+# Notebook support
+jupyter>=1.0.0
+ipykernel>=6.27.0
+
+# Optional: for larger scale training
+# deepspeed>=0.12.0
+# fairscale>=0.4.0

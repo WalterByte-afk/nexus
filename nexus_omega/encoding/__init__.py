@@ -1,0 +1,1 @@
+"""Encoding package for Sparse Distributed Input (Layer 8)."""

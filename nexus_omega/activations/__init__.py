@@ -1,0 +1,1 @@
+"""Activations package for KAN Activation Edges (Layer 2)."""
