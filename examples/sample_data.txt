@@ -1,0 +1,15 @@
+The NEXUS-Omega architecture is a brain-inspired AI system.
+It uses sparse distributed representations for efficient computation.
+The dual-plasticity weights mimic hippocampus and neocortex memory systems.
+Predictive coding enables local Hebbian learning during inference.
+Adaptive recurrent depth allows dynamic computation per token.
+KAN activation edges use learnable B-spline basis functions.
+Synaptic consolidation prevents catastrophic forgetting during training.
+The engram memory cortex manages massive parameter counts with paging.
+Sparse dynamic routing selects relevant experts for each input.
+All layers work together to achieve continual learning without retraining.
+This architecture aims to surpass current state-of-the-art models.
+Energy efficiency is achieved through sparse activation patterns.
+The system runs on low-end hardware with minimal resources.
+Memory scaling is linear instead of quadratic.
+Online learning happens during inference without backpropagation.
