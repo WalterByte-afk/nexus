@@ -29,13 +29,15 @@ class ArchitectureConfig:
     kan_sparsity: float = 0.5  # Sparsity in KAN connections
 
     # Predictive Coding (Layer 3)
-    pc_num_iterations: int = 5  # Predictive coding inference steps
+    pc_num_iterations: int = 5  # Predictive coding inference steps (TRAINING)
+    pc_num_iterations_inference: int = 1  # Fast inference mode (1 iteration only)
     pc_learning_rate: float = 0.1  # Local Hebbian learning rate
     pc_decay: float = 0.01  # Weight decay for stability
 
     # Adaptive Recurrent Depth (Layer 4)
     min_depth: int = 1  # Minimum recurrent loops
-    max_depth: int = 8  # Maximum recurrent loops
+    max_depth: int = 8  # Maximum recurrent loops (TRAINING)
+    max_depth_inference: int = 2  # Fast inference mode (2 loops max)
     depth_policy: Literal["learned", "fixed", "adaptive"] = "learned"
 
     # Dual-Plasticity Weights (Layer 5)

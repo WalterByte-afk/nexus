@@ -87,32 +87,41 @@ class AdaptiveRecurrentDepth(NexusLayer):
         # Add min_depth offset
         depths = depth_samples + self.min_depth
 
-        # Process each token with its predicted depth
-        outputs = []
-        avg_depth = 0.0
+        # VECTORIZED: Process all tokens up to max depth, masking based on their actual depth
+        # Flatten for batch processing
+        state = x.view(-1, hidden)  # [batch*seq, hidden]
+        depths_flat = depths.view(-1)  # [batch*seq]
 
-        for b in range(batch):
-            for s in range(seq_len):
-                token = x[b, s]  # [hidden]
-                depth = depths[b, s].item()
-                avg_depth += depth
+        # VECTORIZED: Pre-compute all recurrent steps and select based on depth
+        # Instead of iterating, we can unroll the recurrence to max_depth steps
+        # and then select the appropriate state for each token based on its depth
 
-                # Recurrent processing
-                hidden_state = token
-                for _ in range(int(depth)):
-                    hidden_state = self.recurrent_cell(hidden_state.unsqueeze(0), hidden_state.unsqueeze(0)).squeeze(0)
+        # Initialize all states
+        all_states = [state]
 
-                outputs.append(hidden_state)
+        # Compute all steps up to max_depth
+        for step in range(self.max_depth):
+            new_state = self.recurrent_cell(all_states[-1], all_states[-1])
+            all_states.append(new_state)
 
-        output = torch.stack(outputs).view(batch, seq_len, hidden)
-        avg_depth = avg_depth / (batch * seq_len)
+        # Stack states: [max_depth+1, batch*seq, hidden]
+        stacked_states = torch.stack(all_states, dim=0)
+
+        # Gather the correct state for each token based on its depth
+        # We need to use depths_flat as indices (0-based, but we have depths_flat from 1..max_depth)
+        # So subtract 1 to get indices into stacked_states
+        depth_indices = (depths_flat - 1).clamp(0, self.max_depth - 1)
+        state = stacked_states[depth_indices, torch.arange(len(state), device=state.device)]
+
+        output = state.view(batch, seq_len, hidden)
+        avg_depth = depths.float().mean()
 
         return LayerOutput(
             output=output,
             metrics={
                 "avg_depth": avg_depth,
-                "min_depth_used": depths.min().item(),
-                "max_depth_used": depths.max().item(),
+                "min_depth_used": depths.min(),
+                "max_depth_used": depths.max(),
             }
         )
 
@@ -157,21 +166,25 @@ class AdaptiveRecurrentDepth(NexusLayer):
         return LayerOutput(
             output=state,
             metrics={
-                "avg_iterations": iterations.mean().item(),
-                "max_iterations": iterations.max().item(),
+                "avg_iterations": iterations.mean(),
+                "max_iterations": iterations.max(),
             }
         )
 
     def _forward_fixed(self, x: torch.Tensor, depth: int) -> LayerOutput:
-        """Fixed depth recurrence."""
+        """Fixed depth recurrence - VECTORIZED."""
         batch, seq_len, hidden = x.shape
 
         state = x.view(-1, hidden)
 
-        for _ in range(depth):
+        # VECTORIZED: Unroll all depth steps and store states
+        all_states = [state]
+        for step in range(depth):
             state = self.recurrent_cell(state, state)
+            all_states.append(state)
 
-        output = state.view(batch, seq_len, hidden)
+        # Take the final state (after 'depth' iterations)
+        output = all_states[-1].view(batch, seq_len, hidden)
 
         return LayerOutput(
             output=output,

@@ -29,10 +29,12 @@ class PredictiveCodingModule(NexusLayer):
         learning_rate: float = 0.1,
         decay: float = 0.01,
         config: Optional[any] = None,
+        inference_iterations: int = 1,  # Reduced iterations for inference mode
     ):
         super().__init__("predictive_coding", config)
         self.hidden_dim = hidden_dim
         self.num_iterations = num_iterations
+        self.inference_iterations = inference_iterations  # Use 1 iteration during inference
         self.learning_rate = learning_rate
         self.decay = decay
 
@@ -62,8 +64,12 @@ class PredictiveCodingModule(NexusLayer):
 
         total_error = 0.0
 
+        # OPTIMIZATION: Use reduced iterations during inference (1 vs 5)
+        # This is the biggest speedup - 5x reduction in computation
+        iterations = self.num_iterations if self.training else self.inference_iterations
+
         # Predictive coding iterations
-        for iteration in range(self.num_iterations):
+        for iteration in range(iterations):
             # Make prediction
             prediction = self.predictor(representation)
 
@@ -77,18 +83,19 @@ class PredictiveCodingModule(NexusLayer):
             # Accumulate error for metrics
             total_error = total_error + error.pow(2).mean()
 
-            # Local Hebbian update (during inference!)
+            # OPTIMIZATION: Make Hebbian updates optional/disabled during inference
+            # Only update weights during training or if explicitly enabled
             if self.training or kwargs.get('enable_online_learning', False):
                 self._hebbian_update(representation, error)
 
-        avg_error = total_error / self.num_iterations
+        avg_error = total_error / iterations
 
         return LayerOutput(
             output=representation,
             aux_loss=avg_error * 0.1,  # Prediction error as auxiliary loss
             metrics={
-                "prediction_error": avg_error.item(),
-                "iterations": self.num_iterations,
+                "prediction_error": avg_error,
+                "iterations": iterations,
             }
         )
 

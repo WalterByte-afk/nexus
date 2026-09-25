@@ -61,6 +61,7 @@ class SynapticConsolidation:
         self,
         dataloader,
         num_samples: int = 1000,
+        device: str = "cuda",
     ):
         """
         Compute Fisher Information Matrix for all weights.
@@ -88,10 +89,23 @@ class SynapticConsolidation:
 
             # Forward pass
             x, y = batch
+            x = x.to(device)
+            y = y.to(device)
+
             output = self.model(x)
 
+            # Extract logits from output
+            if hasattr(output, 'logits'):
+                logits = output.logits
+            else:
+                logits = output
+
+            # For sequential models, average over sequence dimension
+            if len(logits.shape) == 3:
+                logits = logits.mean(dim=1)
+
             # Compute log probability
-            log_probs = torch.log_softmax(output, dim=-1)
+            log_probs = torch.log_softmax(logits, dim=-1)
             selected_log_probs = log_probs.gather(1, y.unsqueeze(1)).squeeze()
 
             # Sum for gradient computation

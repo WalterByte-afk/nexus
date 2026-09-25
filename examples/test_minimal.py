@@ -1,4 +1,3 @@
-
 """Ultra-minimal diagnostic test"""
 import torch
 import sys
@@ -47,22 +46,3 @@ elapsed = time.time() - start
 print(f"\n10 passes: {elapsed:.2f}s")
 print(f"Per pass: {elapsed/10*1000:.0f}ms")
 print(f"Tokens/sec: {50/elapsed:.1f}")
-
-# Apply torch.compile
-print("\nApplying torch.compile...")
-compiled_model = torch.compile(model)
-compile_end_time = time.time()
-
-# Benchmark compiled model
-start_compiled = time.time()
-with torch.no_grad():
-    for _ in range(10):
-        _ = compiled_model(input_ids, enable_online_learning=False)
-torch.cuda.synchronize() if torch.cuda.is_available() else None
-elapsed_compiled = time.time() - start_compiled
-
-print(f"\n10 passes (compiled): {elapsed_compiled:.2f}s")
-print(f"Per pass (compiled): {elapsed_compiled/10*1000:.0f}ms")
-print(f"Tokens/sec (compiled): {50/elapsed_compiled:.1f}")
-
-print(f"Compile time: {compile_end_time - start:.2f}s")

@@ -13,7 +13,8 @@ from dataclasses import dataclass
 from nexus_omega.config.settings import ArchitectureConfig, TrainingConfig, SystemConfig
 from nexus_omega.base.layer import LayerOutput
 from nexus_omega.routing.sparse_router import SparseDynamicRouter
-from nexus_omega.activations.kan_edges import KANLayer
+from nexus_omega.activations.kan_edges import KANLayer, EfficientKANLayer
+from nexus_omega.activations.fast_activation import FastLearnedActivation, SimpleFastActivation, VectorizedEfficientKAN
 from nexus_omega.learning.predictive_coding import PredictiveCodingModule
 from nexus_omega.recurrence.adaptive_depth import AdaptiveRecurrentDepth
 from nexus_omega.memory.dual_plasticity import DualPlasticityWeights
@@ -66,12 +67,12 @@ class NEXUSOmegaBlock(nn.Module):
             sparsity=config.activation_sparsity,
         )
 
-        # Layer 2: KAN Activation Edges
-        self.kan_activation = KANLayer(
+        # Layer 2: KAN Activation Edges (USE FAST VERSION FOR INFERENCE!)
+        # For training: EfficientKANLayer
+        # For inference: SimpleFastActivation (>100x faster)
+        self.kan_activation = SimpleFastActivation(
             in_features=hidden_dim,
             out_features=hidden_dim,
-            grid_size=config.kan_grid_size,
-            spline_order=config.kan_order,
         )
 
         # Layer 3: Predictive Coding

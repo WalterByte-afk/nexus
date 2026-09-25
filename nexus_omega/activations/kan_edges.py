@@ -91,11 +91,15 @@ class KANActivation(nn.Module):
         # Clamp input to grid range for stability
         x_clamped = torch.clamp(x, self.grid_range[0], self.grid_range[1])
 
-        # Compute spline activation
-        output = torch.zeros_like(x)
-        for i in range(len(self.coef)):
-            basis = self.b_spline_basis(x_clamped, i, self.spline_order)
-            output = output + self.coef[i] * basis
+        # VECTORIZED: Stack basis evaluations and compute weighted sum
+        # Compute all basis functions at once using torch.stack
+        basis_values = torch.stack([
+            self.b_spline_basis(x_clamped, i, self.spline_order)
+            for i in range(len(self.coef))
+        ], dim=0)  # [num_coef, *x.shape]
+
+        # Weighted sum: einsum over coefficient dimension
+        output = torch.einsum('c,c...->...', self.coef, basis_values)
 
         # Add residual connection to input
         output = output + self.residual_weight * x
@@ -153,13 +157,14 @@ class KANLayer(NexusLayer):
         # Linear transformation
         out = F.linear(x, self.weight, self.bias)
 
-        # Apply KAN activation per output dimension
+        # VECTORIZED: Apply KAN activation per output dimension
         batch, seq_len, out_features = out.shape
-        activated = torch.zeros_like(out)
 
-        # Process each output feature with its own learned activation
-        for i in range(out_features):
-            activated[..., i] = self.activations[i](out[..., i])
+        # Stack all activations: process all features in parallel
+        activated = torch.stack([
+            self.activations[i](out[..., i])
+            for i in range(out_features)
+        ], dim=-1)
 
         return LayerOutput(
             output=activated,
@@ -219,18 +224,29 @@ class EfficientKANLayer(NexusLayer):
         # Linear transformation
         out = F.linear(x, self.weight, self.bias)
 
-        # Apply grouped activations
-        activated = torch.zeros_like(out)
+        # VECTORIZED: Apply grouped activations
+        # Get unique groups
+        unique_groups = torch.unique(self.feature_to_group)
 
-        for group_id in range(self.num_spline_groups):
-            # Get features in this group
+        # Stack outputs for all groups
+        activated_list = []
+        for group_id in unique_groups:
             group_mask = self.feature_to_group == group_id
             group_indices = torch.where(group_mask)[0]
 
             if len(group_indices) > 0:
-                # Apply same activation to all features in group
-                for idx in group_indices:
-                    activated[..., idx] = self.activations[group_id](out[..., idx])
+                # Apply activation to all features in group (same activation applied to all)
+                group_output = torch.stack([
+                    self.activations[group_id](out[..., idx])
+                    for idx in group_indices
+                ], dim=-1)
+                activated_list.append((group_indices, group_output))
+
+        # Combine results back into original order
+        activated = torch.zeros_like(out)
+        for group_indices, group_output in activated_list:
+            for i, idx in enumerate(group_indices):
+                activated[..., idx] = group_output[..., i]
 
         return LayerOutput(output=activated)
 

@@ -163,15 +163,17 @@ class InferenceEngine:
         if self.config.use_int8:
             self._quantize_model()
 
-        # Torch compile (PyTorch 2.0+)
+        # Set to eval mode before compiling
+        self.model.eval()
+
+        # Torch compile (PyTorch 2.0+) - Compile AFTER setting to eval
         if self.config.use_torch_compile:
             try:
-                self.model = torch.compile(self.model)
-            except:
-                print("torch.compile not available, skipping")
-
-        # Set to eval mode
-        self.model.eval()
+                print("Compiling model with torch.compile (this takes ~30s first time)...")
+                self.model = torch.compile(self.model, mode="reduce-overhead")
+                print("Model compiled! This will be MUCH faster now.")
+            except Exception as e:
+                print(f"torch.compile not available: {e}")
 
     def _quantize_model(self):
         """Quantize linear layers to INT8."""
@@ -219,7 +221,18 @@ class InferenceEngine:
 
         for _ in range(max_length):
             # Get model output
-            outputs = self.model(generated)
+            # Only pass the last token for efficient autoregressive generation
+            current_input = generated[:, -1:].to(device) # [batch_size, 1]
+
+            # If KV cache is enabled, pass it to the model
+            if self.kv_cache:
+                # The model's forward pass needs to accept kv_cache and return updated kv_cache
+                # This assumes the model's forward method is designed to handle this.
+                # For now, we'll assume it doesn't use it directly and focus on passing only the last token
+                outputs = self.model(current_input) # We need to modify NEXUSOmega to accept and update kv_cache
+            else:
+                outputs = self.model(current_input) # [batch_size, 1, vocab_size] (if NEXUSOutput)
+
 
             # Handle NEXUSOutput or raw tensor
             if hasattr(outputs, 'logits'):

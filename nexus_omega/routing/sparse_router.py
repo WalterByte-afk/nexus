@@ -9,7 +9,7 @@ energy savings.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Any
 from nexus_omega.base.layer import NexusLayer, LayerOutput
 from nexus_omega.utils.sparse_utils import top_k_percentage
 
@@ -83,36 +83,35 @@ class SparseDynamicRouter(NexusLayer):
         # Binary routing weights (1.0 for selected, 0.0 otherwise)
         routing_weights = torch.ones_like(routing_scores)
 
-        # Process each token's selected experts
-        outputs = []
-        aux_losses = []
+        # VECTORIZED: Batch process all tokens and experts together
+        # Reshape flat_x to [batch*seq, 1, hidden] for broadcasting
+        flat_x_expanded = flat_x.unsqueeze(1)  # [batch*seq, 1, hidden]
 
-        for i in range(flat_x.shape[0]):
-            token_x = flat_x[i]  # [hidden_dim]
-            expert_idx = expert_indices[i]  # [experts_per_token]
+        # Gather selected expert weights using expert_indices
+        # expert_indices: [batch*seq, experts_per_token]
 
-            # Expert computation (sparse: only selected experts active)
-            expert_output = torch.zeros(hidden, device=x.device)
+        # Down projection - vectorized gather and compute
+        # Shape: [batch*seq, experts_per_token, hidden//4, hidden]
+        selected_down_weights = self.expert_down[expert_indices]  # [batch*seq, experts_per_token, hidden//4, hidden]
+        selected_down_biases = self.expert_biases_down[expert_indices]  # [batch*seq, experts_per_token, hidden//4]
 
-            for j, expert_id in enumerate(expert_idx):
-                # Down projection: hidden_dim -> hidden_dim//4
-                down_weight = self.expert_down[expert_id]  # [hidden//4, hidden]
-                down_bias = self.expert_biases_down[expert_id]  # [hidden//4]
-                h = F.linear(token_x, down_weight, down_bias)
-                h = F.relu(h)
+        # Batch matmul: [batch*seq, experts_per_token, hidden] @ [batch*seq, experts_per_token, hidden, hidden//4]
+        # = [batch*seq, experts_per_token, hidden//4]
+        h = torch.einsum('bh,bkdh->bkd', flat_x, selected_down_weights)
+        h = h + selected_down_biases
+        h = F.relu(h)  # [batch*seq, experts_per_token, hidden//4]
 
-                # Up projection: hidden_dim//4 -> hidden_dim
-                up_weight = self.expert_up[expert_id]  # [hidden, hidden//4]
-                up_bias = self.expert_biases_up[expert_id]  # [hidden]
-                h = F.linear(h, up_weight, up_bias)
+        # Up projection - vectorized
+        selected_up_weights = self.expert_up[expert_indices]  # [batch*seq, experts_per_token, hidden, hidden//4]
+        selected_up_biases = self.expert_biases_up[expert_indices]  # [batch*seq, experts_per_token, hidden]
 
-                expert_output = expert_output + h
+        # [batch*seq, experts_per_token, hidden//4] @ [batch*seq, experts_per_token, hidden//4, hidden]
+        # = [batch*seq, experts_per_token, hidden]
+        expert_outputs = torch.einsum('bkd,bkhd->bkh', h, selected_up_weights)
+        expert_outputs = expert_outputs + selected_up_biases  # [batch*seq, experts_per_token, hidden]
 
-            # Average expert output
-            expert_output = expert_output / self.experts_per_token
-            outputs.append(expert_output)
-
-        output = torch.stack(outputs, dim=0)  # [batch*seq, hidden]
+        # Average across selected experts
+        output = expert_outputs.mean(dim=1)  # [batch*seq, hidden]
         output = output.view(batch, seq_len, hidden)  # [batch, seq, hidden]
 
         return LayerOutput(
@@ -123,10 +122,10 @@ class SparseDynamicRouter(NexusLayer):
             }
         )
 
-    def _compute_routing_entropy(self, logits: torch.Tensor) -> float:
+    def _compute_routing_entropy(self, logits: torch.Tensor) -> torch.Tensor:
         """Compute entropy of routing distribution."""
         probs = F.softmax(logits, dim=-1)
-        entropy = -(probs * (probs + 1e-8).log()).sum(dim=-1).mean().item()
+        entropy = -(probs * (probs + 1e-8).log()).sum(dim=-1).mean()
         return entropy
 
     def count_expert_parameters(self) -> int:
@@ -225,22 +224,30 @@ class SparseMixtureOfExperts(NexusLayer):
         expert_counts = expert_assignments.sum(dim=0)
         capacity_loss = (expert_counts - expert_counts.mean()).pow(2).mean()
 
-        # Expert computation
-        outputs = torch.zeros_like(flat_x)
+        # VECTORIZED Expert computation - NO LOOPS
+        # Stack all expert parameters for batch processing
+        down_weights = torch.stack([e.down_proj.weight for e in self.experts])  # [num_experts, intermediate, hidden]
+        down_biases = torch.stack([e.down_proj.bias for e in self.experts])     # [num_experts, intermediate]
+        up_weights = torch.stack([e.up_proj.weight for e in self.experts])       # [num_experts, hidden, intermediate]
+        up_biases = torch.stack([e.up_proj.bias for e in self.experts])         # [num_experts, hidden]
 
-        for expert_idx in range(self.num_experts):
-            expert = self.experts[expert_idx]
+        # Process all tokens through all experts in parallel
+        # flat_x: [batch*seq, hidden]
+        # Expand to [batch*seq, num_experts, hidden]
+        x_expanded = flat_x.unsqueeze(1).expand(-1, self.num_experts, -1)
 
-            # Get tokens assigned to this expert
-            expert_mask = expert_assignments[:, expert_idx] > 0
+        # Down projection: [batch*seq, num_experts, hidden] @ [num_experts, hidden, intermediate]
+        h = torch.einsum('beh,eih->bei', x_expanded, down_weights.transpose(1, 2))
+        h = h + down_biases.unsqueeze(0)  # Add biases
+        h = F.gelu(h)  # [batch*seq, num_experts, intermediate]
 
-            if expert_mask.any():
-                expert_input = flat_x[expert_mask]
-                expert_output = expert(expert_input)
+        # Up projection: [batch*seq, num_experts, intermediate] @ [num_experts, intermediate, hidden]
+        expert_outputs = torch.einsum('bei,ehi->beh', h, up_weights.transpose(1, 2))
+        expert_outputs = expert_outputs + up_biases.unsqueeze(0)  # [batch*seq, num_experts, hidden]
 
-                # Weight by routing probability
-                weights = expert_assignments[expert_mask, expert_idx].unsqueeze(-1)
-                outputs[expert_mask] = outputs[expert_mask] + expert_output * weights
+        # Weight by routing probabilities and sum
+        # expert_assignments: [batch*seq, num_experts]
+        outputs = torch.einsum('be,beh->bh', expert_assignments, expert_outputs)
 
         output = outputs.view(batch, seq_len, hidden)
 
@@ -248,8 +255,8 @@ class SparseMixtureOfExperts(NexusLayer):
             output=output,
             aux_loss=capacity_loss * 0.01,  # Small weight for capacity loss
             metrics={
-                "expert_utilization": (expert_assignments > 0).float().mean().item(),
-                "capacity_loss": capacity_loss.item(),
+                "expert_utilization": (expert_assignments > 0).float().mean(),
+                "capacity_loss": capacity_loss,
             }
         )
 
